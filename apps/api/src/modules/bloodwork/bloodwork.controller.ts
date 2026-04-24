@@ -60,7 +60,7 @@ export class BloodworkController {
     @ZodBody(CreateBloodTestReportSchema) input: CreateBloodTestReportInput,
   ) {
     const me = await this.members.getByUserId(user.id);
-    return this.bloodwork.createReportWithAnalysis(me.id, input);
+    return this.bloodwork.createReportWithAnalysis(user.id, me.id, input);
   }
 
   @Get("reports/me")
