@@ -1,0 +1,89 @@
+# ── Dependencies ────────────────────────────────────────────
+node_modules/
+.pnpm-store/
+.yarn/
+.pnp.*
+jspm_packages/
+
+# ── Build output ────────────────────────────────────────────
+dist/
+build/
+out/
+.next/
+.nuxt/
+.turbo/
+.nest-cli/
+.swc/
+.rollup.cache/
+*.tsbuildinfo
+.cache/
+
+# ── Env + secrets ───────────────────────────────────────────
+.env
+.env.*
+!.env.example
+!.env.sample
+*.pem
+*.key
+*.crt
+*.p12
+secrets.json
+
+# ── Logs ────────────────────────────────────────────────────
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# ── Test + coverage ─────────────────────────────────────────
+coverage/
+.nyc_output/
+playwright-report/
+test-results/
+*.lcov
+
+# ── Prisma ──────────────────────────────────────────────────
+prisma/migrations/dev.db*
+prisma/*.db
+prisma/*.db-journal
+prisma/.env
+
+# ── Uploads / temp data ─────────────────────────────────────
+uploads/
+tmp/
+temp/
+*.tmp
+*.swp
+*.swo
+
+# ── OS / editor ─────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+Desktop.ini
+.idea/
+.vscode/
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.code-workspace
+.history/
+
+# ── Docker / k8s (local artifacts) ──────────────────────────
+docker/*.pgdata/
+docker/*.redisdata/
+*.pgdata
+*.redisdata
+
+# ── Misc ────────────────────────────────────────────────────
+.vercel/
+.netlify/
+.serverless/
+.fusebox/
+.dynamodb/
+.tern-port
+.eslintcache
+.stylelintcache

@@ -1,0 +1,282 @@
+// Gymflow — domain schema.
+// Invariants preserved in the DB (not just the app):
+//   - member credits >= 0 (CHECK)
+//   - one active booking per (class, member) (UNIQUE partial)
+//   - booking.status drives capacity + attendance logic
+//   - all money/credit math happens inside a transaction in BookingService
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ──────────────────────────────────────────────────────────────
+// Enums
+// ──────────────────────────────────────────────────────────────
+
+enum Role {
+  ADMIN
+  MEMBER
+}
+
+enum BookingStatus {
+  ACTIVE
+  CANCELLED
+  WAITLISTED
+  PROMOTED
+  CHECKED_IN
+  NO_SHOW
+}
+
+enum CheckInMethod {
+  MANUAL
+  QR
+  AUTO
+}
+
+enum MarkerInterpretation {
+  LOW
+  BORDERLINE_LOW
+  NORMAL
+  BORDERLINE_HIGH
+  HIGH
+  UNKNOWN
+}
+
+enum ClassCategory {
+  HIIT
+  CARDIO
+  STRENGTH
+  YOGA
+  MOBILITY
+  PILATES
+  CYCLING
+  RECOVERY
+}
+
+enum ReportSource {
+  MANUAL
+  PDF_UPLOAD
+}
+
+// ──────────────────────────────────────────────────────────────
+// Auth
+// ──────────────────────────────────────────────────────────────
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  role         Role     @default(MEMBER)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  member Member?
+
+  @@index([role])
+}
+
+// ──────────────────────────────────────────────────────────────
+// Domain
+// ──────────────────────────────────────────────────────────────
+
+model Member {
+  id          String   @id @default(cuid())
+  userId      String?  @unique
+  firstName   String
+  lastName    String
+  email       String   @unique
+  phone       String?
+  credits     Int      @default(0)
+  tenureStart DateTime @default(now())
+  cohort      String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user            User?                   @relation(fields: [userId], references: [id], onDelete: SetNull)
+  creditPacks     CreditPack[]
+  bookings        Booking[]
+  attendance      AttendanceLog[]
+  bloodReports    BloodTestReport[]
+  recommendations ProgramRecommendation[]
+
+  @@index([email])
+}
+
+model Trainer {
+  id        String   @id @default(cuid())
+  name      String
+  createdAt DateTime @default(now())
+
+  classes Class[]
+}
+
+model Class {
+  id              String        @id @default(cuid())
+  title           String
+  description     String?
+  category        ClassCategory @default(CARDIO)
+  startsAt        DateTime
+  durationMinutes Int
+  capacity        Int
+  creditCost      Int           @default(1)
+  trainerId       String?
+  location        String?
+  cancelled       Boolean       @default(false)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  trainer    Trainer?        @relation(fields: [trainerId], references: [id], onDelete: SetNull)
+  bookings   Booking[]
+  attendance AttendanceLog[]
+
+  @@index([startsAt])
+  @@index([trainerId])
+}
+
+model CreditPack {
+  id               String    @id @default(cuid())
+  memberId         String
+  amount           Int
+  remainingCredits Int
+  purchasedAt      DateTime  @default(now())
+  expiresAt        DateTime?
+
+  member Member @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@index([memberId])
+}
+
+model Booking {
+  id                     String        @id @default(cuid())
+  classId                String
+  memberId               String
+  status                 BookingStatus @default(ACTIVE)
+  creditCost             Int
+  bookedAt               DateTime      @default(now())
+  waitlistPosition       Int?
+  promotedFromWaitlistAt DateTime?
+  cancelledAt            DateTime?
+  showProbability        Float?
+  modelVersion           String?
+  createdAt              DateTime      @default(now())
+  updatedAt              DateTime      @updatedAt
+
+  class   Class    @relation(fields: [classId], references: [id], onDelete: Cascade)
+  member  Member   @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  checkIn CheckIn?
+
+  @@index([classId, status])
+  @@index([memberId, status])
+  @@index([classId, waitlistPosition])
+}
+
+model CheckIn {
+  id          String        @id @default(cuid())
+  bookingId   String        @unique
+  checkedInAt DateTime      @default(now())
+  method      CheckInMethod @default(MANUAL)
+
+  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+}
+
+model AttendanceLog {
+  id         String   @id @default(cuid())
+  bookingId  String   @unique
+  classId    String
+  memberId   String
+  showed     Boolean
+  recordedAt DateTime @default(now())
+
+  class  Class  @relation(fields: [classId], references: [id], onDelete: Cascade)
+  member Member @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@index([memberId, recordedAt])
+  @@index([classId])
+}
+
+model AiDecisionLog {
+  id                 String   @id @default(cuid())
+  classId            String
+  model              String
+  prompt             String   @db.Text
+  response           String   @db.Text
+  expectedAttendance Float
+  overbookAllowed    Boolean
+  riskBand           String
+  rationale          String   @db.Text
+  latencyMs          Int
+  promptTokens       Int?
+  completionTokens   Int?
+  createdAt          DateTime @default(now())
+
+  @@index([classId, createdAt])
+  @@index([createdAt])
+}
+
+// ──────────────────────────────────────────────────────────────
+// Health (blood-test-driven programming)
+// ──────────────────────────────────────────────────────────────
+
+model BloodTestReport {
+  id          String       @id @default(cuid())
+  memberId    String
+  source      ReportSource @default(MANUAL)
+  collectedAt DateTime?
+  labName     String?
+  notes       String?
+  rawText     String?      @db.Text
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  member         Member                 @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  markers        BloodMarker[]
+  recommendation ProgramRecommendation?
+
+  @@index([memberId, createdAt])
+}
+
+model BloodMarker {
+  id             String               @id @default(cuid())
+  reportId       String
+  canonicalName  String
+  label          String
+  value          Float
+  unit           String
+  refLow         Float?
+  refHigh        Float?
+  interpretation MarkerInterpretation @default(UNKNOWN)
+
+  report BloodTestReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@index([reportId])
+  @@index([canonicalName])
+}
+
+model ProgramRecommendation {
+  id                    String          @id @default(cuid())
+  memberId              String
+  reportId              String          @unique
+  readinessScore        Int
+  recommendedCategories ClassCategory[]
+  avoidCategories       ClassCategory[]
+  perMarker             Json
+  weeklyPlan            String          @db.Text
+  warnings              String[]        @default([])
+  summary               String          @db.Text
+  model                 String
+  promptTokens          Int?
+  completionTokens      Int?
+  latencyMs             Int
+  validUntil            DateTime
+  createdAt             DateTime        @default(now())
+
+  member Member          @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  report BloodTestReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@index([memberId, createdAt])
+}
