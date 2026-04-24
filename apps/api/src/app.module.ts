@@ -19,6 +19,7 @@ import { BookingsModule } from "./modules/bookings/bookings.module";
 import { ClassesModule } from "./modules/classes/classes.module";
 import { HealthModule } from "./modules/health/health.module";
 import { MembersModule } from "./modules/members/members.module";
+import { RealtimeModule } from "./modules/realtime/realtime.module";
 import { TrainersModule } from "./modules/trainers/trainers.module";
 
 @Module({
@@ -43,6 +44,7 @@ import { TrainersModule } from "./modules/trainers/trainers.module";
         storage: new ThrottlerStorageRedisService(redis),
       }),
     }),
+    RealtimeModule,
     AuthModule,
     HealthModule,
     ClassesModule,

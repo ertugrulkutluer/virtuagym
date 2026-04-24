@@ -31,20 +31,21 @@ export default function HomePage() {
         <div>
           <span className="fade-up inline-flex items-center gap-2 rounded-full border border-ink-200 bg-white/70 px-3 py-1 text-xs text-ink-500 shadow-soft">
             <Sparkles className="h-3 w-3 text-accent-600" />
-            Grok-powered overbooking · Zod contract · Redis cache
+            Two AI layers · rules-first · Zod-validated
           </span>
 
           <h1 className="fade-up mt-6 font-display text-5xl font-semibold leading-[1.05] tracking-tight text-balance sm:text-6xl">
-            A gym booking SaaS that actually{" "}
+            A gym booking SaaS where{" "}
             <span className="bg-gradient-to-br from-accent-500 to-accent-700 bg-clip-text text-transparent">
-              knows who shows up.
+              AI does real work.
             </span>
           </h1>
 
           <p className="fade-up mt-5 max-w-xl text-base text-ink-500 text-balance">
-            Members book, credits move, waitlists promote themselves — and when
-            a class fills up, an AI advisor reads the room and tells you whether
-            it&apos;s safe to let one more person in.
+            One advisor reads live bookings and greenlights safe overbooking
+            inside a DB transaction. A second one reads your blood panel and
+            rewrites the week&apos;s class plan around what it finds — rules
+            classify the markers, the model programs on top.
           </p>
 
           <div className="fade-up mt-8 flex flex-wrap items-center gap-3">
@@ -55,14 +56,12 @@ export default function HomePage() {
               See how it works
               <ArrowRight className="h-4 w-4" />
             </Link>
-            <a
-              href="http://localhost:4000/docs"
-              target="_blank"
-              rel="noreferrer"
+            <Link
+              href="/health"
               className="text-sm text-ink-500 transition hover:text-ink-900"
             >
-              API docs →
-            </a>
+              Bloodwork demo →
+            </Link>
           </div>
         </div>
 

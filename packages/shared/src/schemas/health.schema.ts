@@ -17,8 +17,22 @@ export const RawBloodMarkerSchema = z.object({
 });
 export type RawBloodMarkerInput = z.infer<typeof RawBloodMarkerSchema>;
 
+/**
+ * Accepts either a full ISO datetime (`2025-02-03T10:15:00Z`) or a plain
+ * date (`2025-02-03`). Normalises both to an ISO datetime string so the
+ * API only ever sees one shape.
+ */
+const FlexibleIsoDate = z
+  .string()
+  .min(1)
+  .max(40)
+  .refine((s) => !Number.isNaN(Date.parse(s)), {
+    message: "Invalid date (expect ISO date or datetime)",
+  })
+  .transform((s) => new Date(s).toISOString());
+
 export const CreateBloodTestReportSchema = z.object({
-  collectedAt: z.string().datetime().optional(),
+  collectedAt: FlexibleIsoDate.optional(),
   labName: z.string().max(120).optional(),
   notes: z.string().max(500).optional(),
   source: z.enum(["MANUAL", "PDF_UPLOAD"]).default("MANUAL"),

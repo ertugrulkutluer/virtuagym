@@ -21,6 +21,11 @@ import {
 } from "@gymflow/shared";
 import { api, ApiError } from "@/lib/api";
 import { useSession } from "@/lib/session";
+import {
+  maybeNotify,
+  requestNotificationPermissionIfPossible,
+  useSocket,
+} from "@/lib/socket";
 import { useToast } from "@/components/toast";
 
 // ── Types (shaped to match the API response) ────────────────────────
@@ -91,15 +96,29 @@ interface DraftMarker {
 
 // ── Page ─────────────────────────────────────────────────────────────
 
+interface PendingAnalysis {
+  reportId: string;
+  startedAt: number;
+  markers: number;
+}
+
 export default function HealthPage() {
   const { token, user, ready } = useSession();
   const router = useRouter();
   const toast = useToast();
+  const { socket, connected } = useSocket(token);
 
   const [latest, setLatest] = useState<Report | null>(null);
   const [history, setHistory] = useState<Report[]>([]);
   const [loadingLatest, setLoadingLatest] = useState(true);
+  const [pending, setPending] = useState<PendingAnalysis | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Report | null>(null);
 
+  const displayedReport = selected ?? latest;
+  const viewingPast = Boolean(selected && latest && selected.id !== latest.id);
+
+  // ── initial load ────────────────────────────────────────────
   useEffect(() => {
     if (!ready) return;
     if (!user) {
@@ -128,9 +147,92 @@ export default function HealthPage() {
     return () => {
       cancelled = true;
     };
-    // toast + router are imperative — not reactive deps
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, user?.id, token]);
+
+  // ── fetch a history item when clicked ───────────────────────
+  useEffect(() => {
+    if (!selectedId) {
+      setSelected(null);
+      return;
+    }
+    if (selected?.id === selectedId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await api.get<Report>(
+          `/api/bloodwork/reports/${selectedId}`,
+          token,
+        );
+        if (!cancelled) setSelected(r);
+      } catch (err) {
+        if (!cancelled && err instanceof ApiError) {
+          toast.error(`Could not load report: ${err.message}`);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId, token]);
+
+  // ── socket: realtime analysis status ───────────────────────
+  useEffect(() => {
+    if (!socket) return;
+
+    const onStarted = (p: { reportId: string; markers: number }) => {
+      setPending({
+        reportId: p.reportId,
+        startedAt: Date.now(),
+        markers: p.markers,
+      });
+    };
+
+    const onCompleted = async (p: {
+      reportId: string;
+      readinessScore: number;
+      recommendedCategories: string[];
+      avoidCategories: string[];
+    }) => {
+      setPending(null);
+      try {
+        const [fresh, list] = await Promise.all([
+          api.get<Report | null>("/api/bloodwork/reports/me/latest", token),
+          api.get<Report[]>("/api/bloodwork/reports/me", token),
+        ]);
+        setLatest(fresh);
+        setHistory(list);
+      } catch {
+        /* ignore */
+      }
+      toast.success(`Analysis ready — readiness ${p.readinessScore}`);
+      await maybeNotify("Your bloodwork analysis is ready", {
+        body: `Readiness ${p.readinessScore} · ${p.recommendedCategories.length} categories recommended`,
+        tag: `bloodwork-${p.reportId}`,
+        onClick: () => router.push("/health"),
+      });
+    };
+
+    const onFailed = (p: { reportId: string; message: string }) => {
+      setPending(null);
+      toast.error(`Analysis failed: ${p.message}`);
+      void maybeNotify("Bloodwork analysis failed", {
+        body: p.message,
+        tag: `bloodwork-${p.reportId}-failed`,
+      });
+    };
+
+    socket.on("bloodwork:started", onStarted);
+    socket.on("bloodwork:completed", onCompleted);
+    socket.on("bloodwork:failed", onFailed);
+    return () => {
+      socket.off("bloodwork:started", onStarted);
+      socket.off("bloodwork:completed", onCompleted);
+      socket.off("bloodwork:failed", onFailed);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [socket, token]);
 
   if (!ready || !user) return null;
 
@@ -140,6 +242,10 @@ export default function HealthPage() {
         <div>
           <div className="flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-ink-400">
             <FlaskConical className="h-3 w-3" /> Bloodwork
+            <span
+              className={`ml-1 inline-flex h-1.5 w-1.5 rounded-full ${connected ? "bg-emerald-500" : "bg-ink-300"}`}
+              title={connected ? "realtime connected" : "offline"}
+            />
           </div>
           <h1 className="mt-2 font-display text-3xl font-semibold tracking-tight">
             Your weekly program, tuned to your blood panel.
@@ -152,25 +258,50 @@ export default function HealthPage() {
         </div>
       </header>
 
+      {pending && <PendingBanner pending={pending} />}
+
       {loadingLatest ? (
         <div className="mt-10 flex items-center gap-2 text-sm text-ink-500">
           <Loader2 className="h-4 w-4 animate-spin" /> Loading…
         </div>
       ) : (
         <>
-          {latest?.recommendation && (
-            <LatestReportCard report={latest} />
+          {viewingPast && (
+            <button
+              onClick={() => setSelectedId(null)}
+              className="mt-6 inline-flex items-center gap-1 rounded-md border border-ink-200 bg-white px-3 py-1.5 text-xs text-ink-700 shadow-soft transition hover:border-ink-300"
+            >
+              ← Back to current report
+            </button>
           )}
 
-          <UploadSection
-            token={token}
-            onCreated={(r) => {
-              setLatest(r);
-              setHistory((prev) => [r, ...prev]);
-            }}
-          />
+          {displayedReport?.recommendation && (
+            <LatestReportCard
+              report={displayedReport}
+              isPast={viewingPast}
+            />
+          )}
 
-          {history.length > 1 && <HistorySection reports={history} />}
+          {!viewingPast && (
+            <UploadSection
+              token={token}
+              onPending={(reportId, markers) => {
+                setPending({
+                  reportId,
+                  startedAt: Date.now(),
+                  markers,
+                });
+              }}
+            />
+          )}
+
+          {history.length > 1 && (
+            <HistorySection
+              reports={history}
+              selectedId={selectedId ?? latest?.id ?? null}
+              onSelect={(id) => setSelectedId(id === latest?.id ? null : id)}
+            />
+          )}
         </>
       )}
     </main>
@@ -179,16 +310,22 @@ export default function HealthPage() {
 
 // ── Latest report panel (readiness, badges, weekly plan, warnings) ───
 
-function LatestReportCard({ report }: { report: Report }) {
+function LatestReportCard({
+  report,
+  isPast = false,
+}: {
+  report: Report;
+  isPast?: boolean;
+}) {
   const rec = report.recommendation!;
   return (
-    <section className="mt-8 rounded-2xl border border-ink-200 bg-white p-6 shadow-lift sm:p-8">
+    <section className="mt-4 rounded-2xl border border-ink-200 bg-white p-6 shadow-lift sm:p-8">
       <div className="flex flex-wrap items-start justify-between gap-6">
         <div className="flex items-center gap-5">
           <ReadinessRing score={rec.readinessScore} />
           <div>
             <div className="text-xs uppercase tracking-[0.2em] text-ink-400">
-              This week&apos;s readiness
+              {isPast ? "Past readiness" : "This week's readiness"}
             </div>
             <div className="mt-1 font-display text-2xl font-semibold tracking-tight">
               {readinessLabel(rec.readinessScore)}
@@ -321,14 +458,46 @@ function LatestReportCard({ report }: { report: Report }) {
   );
 }
 
+// ── Pending banner ──────────────────────────────────────────────────
+
+function PendingBanner({ pending }: { pending: PendingAnalysis }) {
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    const t = setInterval(
+      () => setElapsed(Math.floor((Date.now() - pending.startedAt) / 1000)),
+      500,
+    );
+    return () => clearInterval(t);
+  }, [pending.startedAt]);
+
+  return (
+    <section className="mt-6 flex items-start gap-3 rounded-xl border border-accent-200 bg-accent-50/60 px-4 py-3">
+      <Loader2 className="mt-0.5 h-4 w-4 animate-spin text-accent-700" />
+      <div className="flex-1">
+        <div className="text-sm font-medium text-ink-900">
+          Analyzing your {pending.markers} markers…
+        </div>
+        <div className="text-xs text-ink-500">
+          Report saved. Grok is writing the weekly plan — this usually takes
+          3–6 seconds. You can leave the page; we&apos;ll ping you when it&apos;s
+          ready.
+        </div>
+      </div>
+      <span className="font-variant-numeric rounded bg-white px-2 py-1 text-xs text-ink-600">
+        {elapsed}s
+      </span>
+    </section>
+  );
+}
+
 // ── Upload + manual entry ───────────────────────────────────────────
 
 function UploadSection({
   token,
-  onCreated,
+  onPending,
 }: {
   token: string | null;
-  onCreated: (r: Report) => void;
+  onPending: (reportId: string, markers: number) => void;
 }) {
   const [mode, setMode] = useState<"pdf" | "manual">("pdf");
   return (
@@ -354,9 +523,9 @@ function UploadSection({
 
       <div className="mt-6">
         {mode === "pdf" ? (
-          <PdfFlow token={token} onCreated={onCreated} />
+          <PdfFlow token={token} onPending={onPending} />
         ) : (
-          <ManualFlow token={token} onCreated={onCreated} />
+          <ManualFlow token={token} onPending={onPending} />
         )}
       </div>
     </section>
@@ -391,10 +560,10 @@ function Tab({
 
 function PdfFlow({
   token,
-  onCreated,
+  onPending,
 }: {
   token: string | null;
-  onCreated: (r: Report) => void;
+  onPending: (reportId: string, markers: number) => void;
 }) {
   const [file, setFile] = useState<File | null>(null);
   const [extracting, setExtracting] = useState(false);
@@ -441,8 +610,14 @@ function PdfFlow({
       return;
     }
     setSubmitting(true);
+    // Ask for notification permission while we still have a user gesture.
+    await requestNotificationPermissionIfPossible();
     try {
-      const res = await api.post<{ report: Report; recommendation: Recommendation }>(
+      const res = await api.post<{
+        reportId: string;
+        pending: true;
+        markers: number;
+      }>(
         "/api/bloodwork/reports",
         {
           ...payload,
@@ -453,15 +628,11 @@ function PdfFlow({
         },
         token,
       );
-      const full: Report = {
-        ...res.report,
-        recommendation: res.recommendation,
-      } as Report;
-      onCreated(full);
+      onPending(res.reportId, res.markers);
       setFile(null);
       setPreview(null);
       setDrafts([]);
-      toast.success("Program updated");
+      toast.success("Report saved — analyzing in the background");
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : String(err));
     } finally {
@@ -555,10 +726,10 @@ function PdfFlow({
 
 function ManualFlow({
   token,
-  onCreated,
+  onPending,
 }: {
   token: string | null;
-  onCreated: (r: Report) => void;
+  onPending: (reportId: string, markers: number) => void;
 }) {
   const [drafts, setDrafts] = useState<DraftMarker[]>(defaultManualDrafts());
   const [submitting, setSubmitting] = useState(false);
@@ -571,19 +742,16 @@ function ManualFlow({
       return;
     }
     setSubmitting(true);
+    await requestNotificationPermissionIfPossible();
     try {
-      const res = await api.post<{ report: Report; recommendation: Recommendation }>(
-        "/api/bloodwork/reports",
-        { ...payload, source: "MANUAL" },
-        token,
-      );
-      const full: Report = {
-        ...res.report,
-        recommendation: res.recommendation,
-      } as Report;
-      onCreated(full);
+      const res = await api.post<{
+        reportId: string;
+        pending: true;
+        markers: number;
+      }>("/api/bloodwork/reports", { ...payload, source: "MANUAL" }, token);
+      onPending(res.reportId, res.markers);
       setDrafts(defaultManualDrafts());
-      toast.success("Program updated");
+      toast.success("Report saved — analyzing in the background");
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : String(err));
     } finally {
@@ -776,40 +944,64 @@ function CellInput({
 
 // ── History section ──────────────────────────────────────────────────
 
-function HistorySection({ reports }: { reports: Report[] }) {
+function HistorySection({
+  reports,
+  selectedId,
+  onSelect,
+}: {
+  reports: Report[];
+  selectedId: string | null;
+  onSelect: (id: string) => void;
+}) {
   return (
     <section className="mt-10">
       <div className="flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-ink-400">
         <CheckCircle2 className="h-3 w-3" /> History
       </div>
       <h2 className="mt-1 font-display text-lg font-semibold tracking-tight">
-        Past reports
+        All reports
       </h2>
       <div className="mt-4 space-y-2">
-        {reports.slice(1).map((r) => {
+        {reports.map((r, idx) => {
           const outOfRange = r.markers.filter(
             (m) => m.interpretation === "LOW" || m.interpretation === "HIGH",
           );
+          const isCurrent = idx === 0;
+          const isActive = r.id === selectedId;
           return (
-            <div
+            <button
               key={r.id}
-              className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-ink-100 bg-white px-4 py-3 text-xs"
+              onClick={() => onSelect(r.id)}
+              className={`flex w-full flex-wrap items-center justify-between gap-3 rounded-md border px-4 py-3 text-left text-xs transition ${
+                isActive
+                  ? "border-accent-300 bg-accent-50/60"
+                  : "border-ink-100 bg-white hover:border-ink-300"
+              }`}
             >
-              <div>
-                <div className="font-medium text-ink-900">
-                  {fmtDate(r.createdAt)}
-                </div>
-                <div className="text-ink-500">
-                  {r.markers.length} markers · {outOfRange.length} out of range
-                  {r.recommendation
-                    ? ` · readiness ${r.recommendation.readinessScore}`
-                    : ""}
+              <div className="flex items-center gap-3">
+                <div>
+                  <div className="font-medium text-ink-900">
+                    {fmtDate(r.createdAt)}
+                  </div>
+                  <div className="text-ink-500">
+                    {r.markers.length} markers · {outOfRange.length} out of range
+                    {r.recommendation
+                      ? ` · readiness ${r.recommendation.readinessScore}`
+                      : " · analyzing…"}
+                  </div>
                 </div>
               </div>
-              <span className="rounded bg-ink-100 px-2 py-0.5 text-[10px] uppercase tracking-wider text-ink-600">
-                {r.source === "PDF_UPLOAD" ? "PDF" : "Manual"}
-              </span>
-            </div>
+              <div className="flex items-center gap-2">
+                {isCurrent && (
+                  <span className="rounded bg-emerald-50 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-emerald-700">
+                    Current
+                  </span>
+                )}
+                <span className="rounded bg-ink-100 px-2 py-0.5 text-[10px] uppercase tracking-wider text-ink-600">
+                  {r.source === "PDF_UPLOAD" ? "PDF" : "Manual"}
+                </span>
+              </div>
+            </button>
           );
         })}
       </div>
