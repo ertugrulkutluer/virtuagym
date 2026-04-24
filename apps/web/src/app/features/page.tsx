@@ -128,8 +128,9 @@ docker/
     classes/    {module, controller, service, repository}
     trainers/   {module, controller, service, repository}
     bookings/   {module, controller, service, repository}
-    ai/         {module, controller, grok-client, no-show-advisor, ai-decision.repository}
+    overbooking/{module, controller, no-show-advisor, overbook-decision.repository}
     bloodwork/  {module, controller, service, repository, classifier, analyzer, pdf-extractor}
+    realtime/   {module, gateway}          ← Socket.IO gateway with JWT handshake
     health/     {module, controller}       ← liveness ping, not the bloodwork feature`}</Pre>
         <P>
           The root never grows past six entries (<C>main.ts</C>,{" "}
@@ -417,7 +418,8 @@ GET  /bloodwork/recommendations/me/latest`}</Pre>
           <Li>
             <C>@nestjs/throttler</C> uses the same Redis for its store, so
             multi-instance API nodes share the limiter counters.{" "}
-            <C>/api/ai</C> = 30/min, <C>/api/bookings</C> POST = 60/min, rest
+            <C>/api/overbooking</C> = 30/min, <C>/api/bookings</C> POST =
+            60/min, rest
             = 240/min.
           </Li>
         </Ul>
@@ -541,7 +543,7 @@ pnpm dev                                             # api + web in parallel`}</
 
         <footer className="mt-16 border-t border-ink-200 pt-8 text-xs text-ink-400">
           <Link
-            href="/admin/ai"
+            href="/admin/overbooking"
             className="text-ink-700 underline-offset-4 hover:underline"
           >
             See the advisor in action →
