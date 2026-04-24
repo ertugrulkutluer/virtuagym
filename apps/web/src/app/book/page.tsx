@@ -1,9 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
-import { FlaskConical, Sparkles, AlertTriangle } from "lucide-react";
-import type { ClassCategory } from "@gymflow/shared";
+import { useEffect, useMemo, useState } from "react";
+import { FlaskConical, Sparkles, AlertTriangle, ArrowRight } from "lucide-react";
+import {
+  MARKER_CATALOG,
+  type ClassCategory,
+  type MarkerInterpretation,
+} from "@gymflow/shared";
 import { api, ApiError } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import { useToast } from "@/components/toast";
@@ -26,14 +30,64 @@ interface ClassList {
   total: number;
 }
 
+interface PerMarkerGuidance {
+  canonicalName: string;
+  interpretation: MarkerInterpretation;
+  explanation: string;
+  impact: "NONE" | "LOW" | "MEDIUM" | "HIGH";
+  suggestedCategories: ClassCategory[];
+  avoidCategories: ClassCategory[];
+}
+
 interface Recommendation {
   id: string;
   readinessScore: number;
   recommendedCategories: ClassCategory[];
   avoidCategories: ClassCategory[];
+  perMarker: PerMarkerGuidance[];
   summary: string;
   validUntil: string;
   createdAt: string;
+}
+
+/**
+ * Given the category of a class and which tone (good/avoid), find up to
+ * two perMarker explanations that justify the tag. Priority: out-of-range
+ * markers first, then borderline, then the highest-impact one.
+ */
+function reasonsForCategory(
+  rec: Recommendation | null,
+  category: ClassCategory,
+  tone: "good" | "avoid",
+): PerMarkerGuidance[] {
+  if (!rec) return [];
+  const list = rec.perMarker.filter((m) => {
+    const cats = tone === "good" ? m.suggestedCategories : m.avoidCategories;
+    return cats.includes(category);
+  });
+  const impactRank = { HIGH: 0, MEDIUM: 1, LOW: 2, NONE: 3 } as const;
+  const interpRank: Record<MarkerInterpretation, number> = {
+    LOW: 0,
+    HIGH: 0,
+    BORDERLINE_LOW: 1,
+    BORDERLINE_HIGH: 1,
+    NORMAL: 2,
+    UNKNOWN: 3,
+  };
+  return [...list]
+    .sort(
+      (a, b) =>
+        interpRank[a.interpretation] - interpRank[b.interpretation] ||
+        impactRank[a.impact] - impactRank[b.impact],
+    )
+    .slice(0, 2);
+}
+
+function markerLabel(canonicalName: string): string {
+  return (
+    MARKER_CATALOG.find((m) => m.canonicalName === canonicalName)?.label ??
+    canonicalName
+  );
 }
 
 export default function BookPage() {
@@ -97,11 +151,6 @@ export default function BookPage() {
     }
   };
 
-  const recSet = {
-    good: new Set(rec?.recommendedCategories ?? []),
-    avoid: new Set(rec?.avoidCategories ?? []),
-  };
-
   return (
     <main className="mx-auto max-w-4xl px-6 py-10">
       <div className="flex items-baseline justify-between">
@@ -153,70 +202,155 @@ export default function BookPage() {
         <div className="mt-10 text-sm text-slate-500">No upcoming classes.</div>
       ) : (
         <div className="mt-6 space-y-3">
-          {classes.map((c) => {
-            const full = c._count.bookings >= c.capacity;
-            const isGood = recSet.good.has(c.category);
-            const isAvoid = recSet.avoid.has(c.category);
-            return (
-              <div
-                key={c.id}
-                className={`flex items-center justify-between rounded-lg border bg-white p-4 transition ${
-                  isGood
-                    ? "border-emerald-200 shadow-soft"
-                    : isAvoid
-                      ? "border-amber-200"
-                      : "border-slate-200"
-                }`}
-              >
-                <div>
-                  <div className="flex items-center gap-2">
-                    <div className="font-medium">{c.title}</div>
-                    <span className="rounded bg-ink-50 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-ink-500">
-                      {c.category}
-                    </span>
-                    {isGood && (
-                      <span className="inline-flex items-center gap-1 rounded bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-700">
-                        <Sparkles className="h-3 w-3" /> Recommended for you
-                      </span>
-                    )}
-                    {isAvoid && (
-                      <span className="inline-flex items-center gap-1 rounded bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700">
-                        <AlertTriangle className="h-3 w-3" /> Go easy this week
-                      </span>
-                    )}
-                  </div>
-                  <div className="mt-1 text-xs text-slate-500">
-                    {new Date(c.startsAt).toLocaleString()} · {c.durationMinutes} min
-                    {c.trainer ? ` · ${c.trainer.name}` : ""}
-                    {c.location ? ` · ${c.location}` : ""}
-                  </div>
-                </div>
-                <div className="flex items-center gap-4">
-                  <div className="text-xs text-slate-500">
-                    {c._count.bookings}/{c.capacity} · {c.creditCost} credit
-                    {c.creditCost > 1 ? "s" : ""}
-                  </div>
-                  {user ? (
-                    <button
-                      onClick={() => book(c.id)}
-                      className="rounded-md bg-brand-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-700"
-                    >
-                      {full ? "Waitlist" : "Book"}
-                    </button>
-                  ) : (
-                    <a
-                      href="/"
-                      className="rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium hover:bg-slate-50"
-                    >
-                      Sign in to book
-                    </a>
-                  )}
-                </div>
-              </div>
-            );
-          })}
+          {classes.map((c) => (
+            <ClassCard
+              key={c.id}
+              klass={c}
+              rec={rec}
+              signedIn={Boolean(user)}
+              onBook={() => book(c.id)}
+            />
+          ))}
         </div>
       )}
     </main>
   );
+}
+
+// ── Class card ───────────────────────────────────────────────
+
+function ClassCard({
+  klass,
+  rec,
+  signedIn,
+  onBook,
+}: {
+  klass: ClassItem;
+  rec: Recommendation | null;
+  signedIn: boolean;
+  onBook: () => void;
+}) {
+  const full = klass._count.bookings >= klass.capacity;
+  const isGood = Boolean(rec?.recommendedCategories.includes(klass.category));
+  const isAvoid = Boolean(rec?.avoidCategories.includes(klass.category));
+  const reasons = useMemo(
+    () =>
+      isGood
+        ? reasonsForCategory(rec, klass.category, "good")
+        : isAvoid
+          ? reasonsForCategory(rec, klass.category, "avoid")
+          : [],
+    [rec, klass.category, isGood, isAvoid],
+  );
+
+  const border = isGood
+    ? "border-emerald-200"
+    : isAvoid
+      ? "border-amber-200"
+      : "border-slate-200";
+
+  return (
+    <article
+      className={`rounded-xl border bg-white p-4 shadow-soft transition hover:shadow-lift ${border}`}
+    >
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="font-medium text-ink-900">{klass.title}</div>
+            <span className="rounded bg-ink-50 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-ink-500">
+              {klass.category}
+            </span>
+            {isGood && (
+              <span className="inline-flex items-center gap-1 rounded bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-700">
+                <Sparkles className="h-3 w-3" /> Recommended for you
+              </span>
+            )}
+            {isAvoid && (
+              <span className="inline-flex items-center gap-1 rounded bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700">
+                <AlertTriangle className="h-3 w-3" /> Go easy this week
+              </span>
+            )}
+          </div>
+          <div className="mt-1 text-xs text-slate-500">
+            {new Date(klass.startsAt).toLocaleString()} · {klass.durationMinutes}{" "}
+            min
+            {klass.trainer ? ` · ${klass.trainer.name}` : ""}
+            {klass.location ? ` · ${klass.location}` : ""}
+          </div>
+        </div>
+        <div className="flex items-center gap-4">
+          <div className="text-xs text-slate-500">
+            {klass._count.bookings}/{klass.capacity} · {klass.creditCost} credit
+            {klass.creditCost > 1 ? "s" : ""}
+          </div>
+          {signedIn ? (
+            <button
+              onClick={onBook}
+              className="rounded-md bg-brand-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-700"
+            >
+              {full ? "Waitlist" : "Book"}
+            </button>
+          ) : (
+            <a
+              href="/"
+              className="rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium hover:bg-slate-50"
+            >
+              Sign in to book
+            </a>
+          )}
+        </div>
+      </div>
+
+      {reasons.length > 0 && (
+        <div
+          className={`mt-3 rounded-md px-3 py-2 text-xs ${
+            isGood
+              ? "bg-emerald-50/60 text-emerald-800"
+              : "bg-amber-50/70 text-amber-900"
+          }`}
+        >
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div className="space-y-1.5">
+              {reasons.map((r) => (
+                <div key={r.canonicalName} className="flex gap-2">
+                  <span className="font-semibold whitespace-nowrap">
+                    {markerLabel(r.canonicalName)} ·{" "}
+                    {formatBand(r.interpretation)}:
+                  </span>
+                  <span className="text-ink-700">{r.explanation}</span>
+                </div>
+              ))}
+            </div>
+            <Link
+              href="/health"
+              className={`inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-md border bg-white px-2 py-1 text-[10px] font-medium transition ${
+                isGood
+                  ? "border-emerald-200 text-emerald-700 hover:border-emerald-300"
+                  : "border-amber-200 text-amber-800 hover:border-amber-300"
+              }`}
+            >
+              See report <ArrowRight className="h-3 w-3" />
+            </Link>
+          </div>
+        </div>
+      )}
+    </article>
+  );
+}
+
+function formatBand(i: MarkerInterpretation): string {
+  switch (i) {
+    case "LOW":
+      return "low";
+    case "HIGH":
+      return "high";
+    case "BORDERLINE_LOW":
+      return "near the lower edge";
+    case "BORDERLINE_HIGH":
+      return "near the upper edge";
+    case "NORMAL":
+      return "normal";
+    default:
+      return "unclassified";
+  }
 }
