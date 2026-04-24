@@ -24,7 +24,7 @@ export default function AdminHome() {
       <div className="mt-8 grid gap-4 sm:grid-cols-3">
         <AdminCard href="/admin/classes" title="Classes" hint="Schedule and capacity." />
         <AdminCard href="/admin/members" title="Members" hint="Profiles and credit packs." />
-        <AdminCard href="/admin/ai" title="AI advisor" hint="Grok overbooking, decision log, toggle." />
+        <AdminCard href="/admin/overbooking" title="Overbooking advisor" hint="Grok overbooking, decision log, toggle." />
       </div>
     </main>
   );

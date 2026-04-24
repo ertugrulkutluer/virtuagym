@@ -138,4 +138,41 @@ export class BloodworkRepository {
       orderBy: { createdAt: "desc" },
     });
   }
+
+  // ── Analysis cache (content-addressable) ────────────────────
+
+  findAnalysisCache(inputHash: string) {
+    return this.prisma.bloodworkAnalysisCache.findUnique({
+      where: { inputHash },
+    });
+  }
+
+  async recordAnalysisCacheHit(inputHash: string): Promise<void> {
+    await this.prisma.bloodworkAnalysisCache.update({
+      where: { inputHash },
+      data: { hitCount: { increment: 1 } },
+    });
+  }
+
+  upsertAnalysisCache(input: {
+    inputHash: string;
+    model: string;
+    response: unknown;
+    promptTokens: number | null;
+    completionTokens: number | null;
+    latencyMs: number;
+  }) {
+    return this.prisma.bloodworkAnalysisCache.upsert({
+      where: { inputHash: input.inputHash },
+      create: {
+        inputHash: input.inputHash,
+        model: input.model,
+        response: input.response as Prisma.InputJsonValue,
+        promptTokens: input.promptTokens ?? undefined,
+        completionTokens: input.completionTokens ?? undefined,
+        latencyMs: input.latencyMs,
+      },
+      update: {}, // race-safe: if another request wrote first, keep theirs
+    });
+  }
 }

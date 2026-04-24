@@ -9,16 +9,17 @@ import { IdempotencyInterceptor } from "./common/interceptors/idempotency.interc
 import { RequestIdMiddleware } from "./common/middleware/request-id.middleware";
 import { AppConfigModule } from "./config/config.module";
 import { EnvService } from "./config/env.service";
+import { GrokModule } from "./core/grok/grok.module";
 import { PrismaModule } from "./core/prisma/prisma.module";
 import { RedisModule } from "./core/redis/redis.module";
 import { REDIS_CLIENT } from "./core/redis/redis.service";
-import { AiModule } from "./modules/ai/ai.module";
 import { AuthModule } from "./modules/auth/auth.module";
 import { BloodworkModule } from "./modules/bloodwork/bloodwork.module";
 import { BookingsModule } from "./modules/bookings/bookings.module";
 import { ClassesModule } from "./modules/classes/classes.module";
 import { HealthModule } from "./modules/health/health.module";
 import { MembersModule } from "./modules/members/members.module";
+import { OverbookingModule } from "./modules/overbooking/overbooking.module";
 import { RealtimeModule } from "./modules/realtime/realtime.module";
 import { TrainersModule } from "./modules/trainers/trainers.module";
 
@@ -28,6 +29,7 @@ import { TrainersModule } from "./modules/trainers/trainers.module";
     ScheduleModule.forRoot(),
     PrismaModule,
     RedisModule,
+    GrokModule,
     ThrottlerModule.forRootAsync({
       imports: [RedisModule],
       inject: [REDIS_CLIENT, EnvService],
@@ -50,7 +52,7 @@ import { TrainersModule } from "./modules/trainers/trainers.module";
     ClassesModule,
     MembersModule,
     TrainersModule,
-    AiModule,
+    OverbookingModule,
     BookingsModule,
     BloodworkModule,
   ],

@@ -2,9 +2,9 @@ import { Test } from "@nestjs/testing";
 import { EnvService } from "../../config/env.service";
 import { PrismaService } from "../../core/prisma/prisma.service";
 import { RedisService } from "../../core/redis/redis.service";
-import { AiDecisionRepository } from "./ai-decision.repository";
-import { GrokClient } from "./grok-client.service";
+import { GrokClient } from "../../core/grok/grok.service";
 import { NoShowAdvisor } from "./no-show-advisor.service";
+import { OverbookDecisionRepository } from "./overbook-decision.repository";
 
 describe("NoShowAdvisor.shouldAllowOverbook", () => {
   let advisor: NoShowAdvisor;
@@ -41,7 +41,7 @@ describe("NoShowAdvisor.shouldAllowOverbook", () => {
       providers: [
         NoShowAdvisor,
         { provide: GrokClient, useValue: grok },
-        { provide: AiDecisionRepository, useValue: decisions },
+        { provide: OverbookDecisionRepository, useValue: decisions },
         { provide: PrismaService, useValue: prisma },
         { provide: RedisService, useValue: redis },
         { provide: EnvService, useValue: env },

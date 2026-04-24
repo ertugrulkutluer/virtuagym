@@ -6,7 +6,7 @@ import {
   type ReportExtractionResponse,
 } from "@gymflow/shared";
 import { PDFParse } from "pdf-parse";
-import { GrokClient } from "../ai/grok-client.service";
+import { GrokClient } from "../../core/grok/grok.service";
 
 const MAX_TEXT_CHARS = 25_000;
 const MIN_TEXT_CHARS = 40;

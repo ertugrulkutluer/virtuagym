@@ -59,8 +59,8 @@ export default function AdminAiPage() {
 
   const reload = async () => {
     const [s, h, cls] = await Promise.all([
-      api.get<Status>("/api/ai/status", token),
-      api.get<DecisionRow[]>("/api/ai/decisions?limit=20", token),
+      api.get<Status>("/api/overbooking/status", token),
+      api.get<DecisionRow[]>("/api/overbooking/decisions?limit=20", token),
       api.get<{ items: UpcomingClass[] }>(
         `/api/classes?from=${new Date().toISOString()}`,
         token,
@@ -83,7 +83,7 @@ export default function AdminAiPage() {
     setBusy(true);
     try {
       const next = await api.post<Status>(
-        "/api/ai/toggle",
+        "/api/overbooking/toggle",
         { enabled: !status.enabled },
         token,
       );
@@ -100,7 +100,7 @@ export default function AdminAiPage() {
     setBusy(true);
     try {
       const next = await api.post<Status>(
-        "/api/ai/toggle",
+        "/api/overbooking/toggle",
         { overbookFactor: factorVal },
         token,
       );
@@ -118,7 +118,7 @@ export default function AdminAiPage() {
     if (!classId) return;
     setBusy(true);
     try {
-      const res = await api.get<Advice>(`/api/ai/class/${classId}`, token);
+      const res = await api.get<Advice>(`/api/overbooking/class/${classId}`, token);
       setAdvice(res);
       toast.success(`Advice ready · ${res.riskBand.toLowerCase()} risk`);
       reload();

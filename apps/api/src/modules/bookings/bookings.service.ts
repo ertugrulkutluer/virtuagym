@@ -6,7 +6,7 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import { Booking, CheckInMethod } from "@prisma/client";
-import { NoShowAdvisor } from "../ai/no-show-advisor.service";
+import { NoShowAdvisor } from "../overbooking/no-show-advisor.service";
 import { BookingsRepository } from "./bookings.repository";
 
 const CHECKIN_EARLY_WINDOW_MIN = 30;

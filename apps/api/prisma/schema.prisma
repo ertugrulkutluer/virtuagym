@@ -199,7 +199,7 @@ model AttendanceLog {
   @@index([classId])
 }
 
-model AiDecisionLog {
+model OverbookDecisionLog {
   id                 String   @id @default(cuid())
   classId            String
   model              String
@@ -216,6 +216,7 @@ model AiDecisionLog {
 
   @@index([classId, createdAt])
   @@index([createdAt])
+  @@map("AiDecisionLog")
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -255,6 +256,25 @@ model BloodMarker {
 
   @@index([reportId])
   @@index([canonicalName])
+}
+
+/// Content-addressable cache for Grok bloodwork analysis results.
+/// Key = sha256 of the exact (system+user) prompt. Re-submitting an
+/// identical panel replays the stored response and bumps hitCount — no
+/// second Grok round-trip.
+model BloodworkAnalysisCache {
+  id               String   @id @default(cuid())
+  inputHash        String   @unique
+  model            String
+  response         Json
+  promptTokens     Int?
+  completionTokens Int?
+  latencyMs        Int
+  hitCount         Int      @default(0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([createdAt])
 }
 
 model ProgramRecommendation {

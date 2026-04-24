@@ -6,12 +6,12 @@ import { Roles } from "../../common/decorators/roles.decorator";
 import { ZodBody } from "../../common/decorators/zod-body.decorator";
 import { NoShowAdvisor } from "./no-show-advisor.service";
 
-@ApiTags("ai")
+@ApiTags("overbooking")
 @ApiBearerAuth()
 @Roles(Role.ADMIN)
 @Throttle({ ai: { limit: 30, ttl: 60_000 } })
-@Controller("ai")
-export class AiController {
+@Controller("overbooking")
+export class OverbookingController {
   constructor(private readonly advisor: NoShowAdvisor) {}
 
   @SkipThrottle()

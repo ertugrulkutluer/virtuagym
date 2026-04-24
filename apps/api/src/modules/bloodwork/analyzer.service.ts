@@ -5,7 +5,9 @@ import {
   getMarkerDef,
   type ProgramRecommendationResponse,
 } from "@gymflow/shared";
-import { GrokClient } from "../ai/grok-client.service";
+import { createHash } from "node:crypto";
+import { GrokClient } from "../../core/grok/grok.service";
+import { BloodworkRepository } from "./bloodwork.repository";
 import type { ClassifiedMarker, StratifiedMarkers } from "./classifier.service";
 
 export interface AnalysisInput {
@@ -23,6 +25,7 @@ export interface AnalysisOutput {
   latencyMs: number;
   promptTokens: number | null;
   completionTokens: number | null;
+  cached: boolean;
 }
 
 /**
@@ -33,11 +36,31 @@ export interface AnalysisOutput {
 export class BloodworkAnalyzer {
   private readonly logger = new Logger(BloodworkAnalyzer.name);
 
-  constructor(private readonly grok: GrokClient) {}
+  constructor(
+    private readonly grok: GrokClient,
+    private readonly repo: BloodworkRepository,
+  ) {}
 
   async analyze(input: AnalysisInput): Promise<AnalysisOutput> {
     const system = this.buildSystemPrompt();
     const user = this.buildUserPrompt(input);
+    const inputHash = this.inputHash(system, user);
+
+    // Content-addressable cache in Postgres — identical prompt replays the
+    // stored Grok response, bumps hitCount, and skips the round-trip.
+    const hit = await this.repo.findAnalysisCache(inputHash);
+    if (hit) {
+      this.logger.debug(`analysis cache hit ${inputHash}`);
+      void this.repo.recordAnalysisCacheHit(inputHash).catch(() => undefined);
+      return {
+        response: hit.response as unknown as ProgramRecommendationResponse,
+        model: hit.model,
+        latencyMs: 0,
+        promptTokens: hit.promptTokens,
+        completionTokens: hit.completionTokens,
+        cached: true,
+      };
+    }
 
     const res = await this.grok.chat({
       messages: [
@@ -70,13 +93,32 @@ export class BloodworkAnalyzer {
       });
     }
 
+    const sanitized = this.sanitize(validated.data);
+    await this.repo.upsertAnalysisCache({
+      inputHash,
+      model: res.model,
+      response: sanitized,
+      promptTokens: res.usage?.prompt_tokens ?? null,
+      completionTokens: res.usage?.completion_tokens ?? null,
+      latencyMs: res.latencyMs,
+    });
+
     return {
-      response: this.sanitize(validated.data),
+      response: sanitized,
       model: res.model,
       latencyMs: res.latencyMs,
       promptTokens: res.usage?.prompt_tokens ?? null,
       completionTokens: res.usage?.completion_tokens ?? null,
+      cached: false,
     };
+  }
+
+  private inputHash(system: string, user: string): string {
+    return createHash("sha256")
+      .update(system)
+      .update("\n\n")
+      .update(user)
+      .digest("hex");
   }
 
   private buildSystemPrompt(): string {

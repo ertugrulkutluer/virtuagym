@@ -7,8 +7,8 @@ import { createHash } from "node:crypto";
 import { EnvService } from "../../config/env.service";
 import { PrismaService } from "../../core/prisma/prisma.service";
 import { RedisService } from "../../core/redis/redis.service";
-import { AiDecisionRepository } from "./ai-decision.repository";
-import { GrokClient } from "./grok-client.service";
+import { GrokClient } from "../../core/grok/grok.service";
+import { OverbookDecisionRepository } from "./overbook-decision.repository";
 
 interface OverbookDecision {
   allow: boolean;
@@ -35,7 +35,7 @@ export class NoShowAdvisor {
 
   constructor(
     private readonly grok: GrokClient,
-    private readonly decisions: AiDecisionRepository,
+    private readonly decisions: OverbookDecisionRepository,
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
     private readonly env: EnvService,
@@ -161,7 +161,7 @@ export class NoShowAdvisor {
       .update(`${bookingIds.slice().sort().join(",")}|f${this.overbookFactor}`)
       .digest("hex")
       .slice(0, 16);
-    return `ai:advice:${classId}:${digest}`;
+    return `overbook:advice:${classId}:${digest}`;
   }
 
   decisionHistory(limit = 30) {

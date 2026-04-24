@@ -16,22 +16,22 @@ export interface RecordDecisionInput {
 }
 
 @Injectable()
-export class AiDecisionRepository {
+export class OverbookDecisionRepository {
   constructor(private readonly prisma: PrismaService) {}
 
   record(input: RecordDecisionInput) {
-    return this.prisma.aiDecisionLog.create({ data: input });
+    return this.prisma.overbookDecisionLog.create({ data: input });
   }
 
   history(limit = 30) {
-    return this.prisma.aiDecisionLog.findMany({
+    return this.prisma.overbookDecisionLog.findMany({
       orderBy: { createdAt: "desc" },
       take: limit,
     });
   }
 
   latestForClass(classId: string) {
-    return this.prisma.aiDecisionLog.findFirst({
+    return this.prisma.overbookDecisionLog.findFirst({
       where: { classId },
       orderBy: { createdAt: "desc" },
     });
