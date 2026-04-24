@@ -18,18 +18,23 @@ export default function FeaturesPage() {
             Gymflow
           </h1>
           <P>
-            Mini gym class booking SaaS with an AI-assisted overbooking
-            advisor. Built as a focused &ldquo;show&rdquo; project for the
-            Virtuagym B2B domain (class booking + credits + check-in) with a
-            smart-waitlist feature on top that the base product does not have.
+            Mini gym class booking SaaS with two AI layers on top: an
+            overbooking advisor on the class side, and a blood-panel driven
+            weekly program on the member side. Built as a focused
+            &ldquo;show&rdquo; project for the Virtuagym B2B domain (class
+            booking + credits + check-in), then extended with features the
+            base product does not have.
           </P>
         </header>
 
         <H2>The idea</H2>
         <P>
           The core product is the boring part: members book classes, pay in
-          credits, check in. The interesting part is the + layer:
+          credits, check in. The interesting part is the + layer, which is
+          now two features.
         </P>
+
+        <H3>+ Overbooking advisor</H3>
         <Ul>
           <Li>
             <B>Grok-powered advisor</B> reads the current class context
@@ -52,6 +57,37 @@ export default function FeaturesPage() {
           <Li>
             <B>Admin override:</B> flip the advisor off in one click and fall
             back to hard capacity.
+          </Li>
+        </Ul>
+
+        <H3>+ Bloodwork-driven weekly program</H3>
+        <Ul>
+          <Li>
+            Members upload a <B>blood-test PDF</B> or enter values manually.
+            Recognised markers are classified by a deterministic rule layer,
+            then Grok writes a one-week gym plan around the bands.
+          </Li>
+          <Li>
+            <B>Rules first, LLM second:</B> every marker&apos;s interpretation
+            (LOW / BORDERLINE / NORMAL / HIGH) comes from a reference-range +
+            20% margin rule — not the model. Same input, same bucket, always.
+          </Li>
+          <Li>
+            <B>Editable preview:</B> PDF extraction never saves anything
+            directly — the user reviews and edits the pulled rows before
+            confirming.
+          </Li>
+          <Li>
+            <B>Tailored class browser:</B> the <C>/book</C> page decorates
+            each class card with &ldquo;Recommended for you&rdquo; / &ldquo;Go
+            easy this week&rdquo; badges based on the member&apos;s latest{" "}
+            <C>recommendedCategories</C> / <C>avoidCategories</C>.
+          </Li>
+          <Li>
+            <B>Inspired by BloodKnows:</B> the <C>rules → stratify → single
+            focused LLM call → Zod-validate</C> pipeline is adapted from a
+            real bloodwork product, collapsed to one LLM hop because the rule
+            layer already does the marker-level work.
           </Li>
         </Ul>
 
@@ -93,7 +129,8 @@ docker/
     trainers/   {module, controller, service, repository}
     bookings/   {module, controller, service, repository}
     ai/         {module, controller, grok-client, no-show-advisor, ai-decision.repository}
-    health/     {module, controller}`}</Pre>
+    bloodwork/  {module, controller, service, repository, classifier, analyzer, pdf-extractor}
+    health/     {module, controller}       ← liveness ping, not the bloodwork feature`}</Pre>
         <P>
           The root never grows past six entries (<C>main.ts</C>,{" "}
           <C>app.module.ts</C>, <C>config/</C>, <C>core/</C>, <C>common/</C>,{" "}
@@ -228,6 +265,144 @@ export type NoShowAdvisorResponse = z.infer<typeof NoShowAdvisorResponseSchema>;
           </Li>
         </Ul>
 
+        <H2>The bloodwork analyzer</H2>
+        <Pre>{`POST /bloodwork/extract   (PDF → preview, nothing saved)
+POST /bloodwork/reports   (confirm + persist + analyze)
+GET  /bloodwork/reports/me           (list)
+GET  /bloodwork/reports/me/latest    (latest)
+GET  /bloodwork/reports/:id          (detail)
+GET  /bloodwork/recommendations/me/latest`}</Pre>
+        <P>Pipeline (PDF path):</P>
+        <Pre>{`raw PDF ─► pdf-extractor ─► pdf-parse (text layer)
+                          └► Grok (structure → marker rows)
+                                │
+                                ▼
+                          editable preview (not persisted)
+                                │
+                       user confirms/edits
+                                ▼
+                      bloodwork.service
+                       ├─► normaliseMarkers (drop anything outside catalog)
+                       ├─► classifier.service  (rules, no LLM)  → bands
+                       ├─► analyzer.service    (single Grok call) → program
+                       └─► repository $transaction (report + markers + recommendation)`}</Pre>
+        <Ul>
+          <Li>
+            <B>Domain first, LLM second.</B> <C>classifier.service.ts</C>{" "}
+            deterministically buckets every marker into LOW / BORDERLINE_LOW
+            / NORMAL / BORDERLINE_HIGH / HIGH using the reference range and a
+            20% margin rule (same pattern BloodKnows uses). No LLM runs until
+            this is done.
+          </Li>
+          <Li>
+            <B>PDF extraction is non-destructive.</B>{" "}
+            <C>pdf-extractor.service.ts</C> pulls the text layer with{" "}
+            <C>pdf-parse</C>, then asks Grok to structure it into
+            catalog-mapped marker rows. Image-only PDFs are rejected with a
+            clear error. The preview is never saved — it&apos;s returned as
+            an editable table so the user can correct OCR mistakes before
+            committing.
+          </Li>
+          <Li>
+            <B>Single-stage analyzer.</B> <C>analyzer.service.ts</C> makes one
+            LLM call over already-classified markers. The model writes the
+            program (categories, weekly plan, warnings, per-marker
+            qualitative explanation, readiness score 0–100) but is told to
+            trust the interpretation bands and never quote raw numbers.
+          </Li>
+          <Li>
+            <B>Atomic persistence.</B> <C>bloodwork.service.ts</C> runs
+            normalise → classify → analyze → <C>$transaction</C> persist, so
+            you either get a complete report + markers + recommendation or
+            nothing.
+          </Li>
+        </Ul>
+        <Pre title="packages/shared/src/schemas/health.schema.ts">
+{`export const ProgramRecommendationResponseSchema = z.object({
+  readinessScore:         z.number().int().min(0).max(100),
+  recommendedCategories:  z.array(ClassCategoryEnum).max(6),
+  avoidCategories:        z.array(ClassCategoryEnum).max(6),
+  perMarker: z.array(z.object({
+    canonicalName:        z.string(),
+    interpretation:       MarkerInterpretationEnum,
+    explanation:          z.string().max(400),
+    impact:               z.enum(["NONE","LOW","MEDIUM","HIGH"]),
+    suggestedCategories:  z.array(ClassCategoryEnum),
+    avoidCategories:      z.array(ClassCategoryEnum),
+  })).max(30),
+  weeklyPlan:             z.string().max(1200),
+  warnings:               z.array(z.string().max(240)).max(8),
+  summary:                z.string().max(800),
+});`}
+        </Pre>
+        <P>
+          <C>ClassCategory</C> (shared enum): <C>HIIT</C>, <C>CARDIO</C>,{" "}
+          <C>STRENGTH</C>, <C>YOGA</C>, <C>MOBILITY</C>, <C>PILATES</C>,{" "}
+          <C>CYCLING</C>, <C>RECOVERY</C>. Every class row carries one; the{" "}
+          <C>/book</C> page matches it against the member&apos;s latest{" "}
+          <C>recommendedCategories</C> / <C>avoidCategories</C> to decorate
+          each card with a badge.
+        </P>
+
+        <H3>Marker catalog</H3>
+        <P>
+          <C>packages/shared/src/constants/marker-catalog.ts</C> — ~18
+          markers across hematology, iron, metabolic, lipid, thyroid,
+          vitamin, inflammation, kidney, liver, electrolyte. Each entry has:
+        </P>
+        <Ul>
+          <Li>
+            <C>canonicalName</C> + <C>aliases[]</C> (used to normalise any
+            incoming label)
+          </Li>
+          <Li>
+            <C>unit</C>, <C>refLow</C>, <C>refHigh</C>
+          </Li>
+          <Li>
+            <C>category</C> (used to group in UI + prompt)
+          </Li>
+          <Li>
+            <C>exerciseRelevance</C> — one-line hint surfaced in the LLM
+            prompt context
+          </Li>
+        </Ul>
+        <P>
+          A label the catalog doesn&apos;t recognise is silently dropped —
+          the catalog is the source of truth, Grok doesn&apos;t get to add
+          markers.
+        </P>
+
+        <H3>Guardrails</H3>
+        <Ul>
+          <Li>
+            Hallucinated marker names → dropped by <C>normaliseMarkers</C>{" "}
+            before the analyzer runs.
+          </Li>
+          <Li>
+            Analyzer output is Zod-parsed — extra categories, malformed
+            shapes, or missing fields throw.
+          </Li>
+          <Li>
+            Write endpoints are <C>@Idempotent()</C> (Redis-backed, 10-min
+            replay window) so a double-click never creates two reports with
+            different readiness scores.
+          </Li>
+          <Li>
+            Raw PDF text is stored on the report for audit, but the UI only
+            exposes the structured rows.
+          </Li>
+        </Ul>
+
+        <H3>Why one LLM call, not three</H3>
+        <P>
+          BloodKnows (the reference product) runs a recommendations pass, an
+          insights pass, and a summary pass in parallel and stitches them. I
+          collapsed it to one call because the rule layer already owns
+          marker classification, so the LLM only needs to do the programming
+          judgment on top. Result: lower latency, simpler error handling,
+          still deterministic where it matters.
+        </P>
+
         <H2>Redis (cache + rate limit)</H2>
         <Ul>
           <Li>
@@ -266,7 +441,7 @@ cp .env.example .env
 pnpm db:up                                           # Postgres + Redis
 pnpm --filter @gymflow/shared build                  # emit dist for api & web
 pnpm --filter @gymflow/api prisma:deploy             # apply migrations
-pnpm --filter @gymflow/api seed                      # ~42 members, 280 classes, 1.4k history
+pnpm --filter @gymflow/api seed                      # ~42 members, 470 classes (8 categories), 2.5k booking history
 pnpm dev                                             # api + web in parallel`}</Pre>
         <P>URLs:</P>
         <Ul>
@@ -313,6 +488,11 @@ pnpm dev                                             # api + web in parallel`}</
             <C>NoShowAdvisor</C> — disabled mode, fail-closed on advisor
             errors, out-of-range overbook factor.
           </Li>
+          <Li>
+            <C>BloodworkClassifier</C> — manual smoke test confirms
+            deterministic bands for seeded sample panels using the
+            reference-range + 20% margin rule.
+          </Li>
         </Ul>
         <P>
           Repositories are not mocked at the Prisma level — they&apos;re
@@ -335,18 +515,28 @@ pnpm dev                                             # api + web in parallel`}</
 
         <H2>What this project is not</H2>
         <Ul>
+          <Li>
+            <B>Not a medical device.</B> The bloodwork analyzer is a demo of
+            the rules-first / LLM-assist pattern — reference ranges are
+            generic adult values, there is no age/sex stratification, and the
+            output is fitness programming, not clinical advice.
+          </Li>
           <Li>Not multi-tenant. One gym, one workspace.</Li>
           <Li>No payments — credits are granted by admin.</Li>
           <Li>No mobile app. Web only.</Li>
           <Li>
-            No email marketing, nutrition tracking, or trainer CRM features.
-            Virtuagym has those in the real product; they don&apos;t serve
-            this demo&apos;s story.
+            No email marketing or trainer CRM features. Virtuagym has those
+            in the real product; they don&apos;t serve this demo&apos;s story.
+          </Li>
+          <Li>
+            OCR for image-only PDFs is explicitly out of scope — the
+            extractor rejects them with a message asking the user to
+            re-upload or enter values manually.
           </Li>
         </Ul>
         <P>
-          Every feature is either core-necessary for the overbooking advisor
-          to work, or part of the advisor itself.
+          Every feature is either core-necessary for the booking flow, part
+          of the overbooking advisor, or part of the bloodwork analyzer.
         </P>
 
         <footer className="mt-16 border-t border-ink-200 pt-8 text-xs text-ink-400">

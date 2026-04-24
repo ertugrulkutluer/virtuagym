@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { Suspense } from "react";
 import { ArrowRight, Sparkles, Database, Zap, Shield, Layers } from "lucide-react";
 import { LoginCard } from "@/components/login-card";
 import { useSession } from "@/lib/session";
@@ -69,7 +70,9 @@ export default function HomePage() {
           {ready && user ? (
             <SignedInPanel email={user.email} role={user.role} />
           ) : (
-            <LoginCard />
+            <Suspense fallback={<div className="h-64" />}>
+              <LoginCard />
+            </Suspense>
           )}
         </div>
       </section>

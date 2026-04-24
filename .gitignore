@@ -87,3 +87,4 @@ docker/*.redisdata/
 .tern-port
 .eslintcache
 .stylelintcache
+notes.md
