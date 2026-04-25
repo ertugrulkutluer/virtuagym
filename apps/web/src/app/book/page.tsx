@@ -3,11 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { FlaskConical, Sparkles, AlertTriangle, ArrowRight } from "lucide-react";
-import {
-  MARKER_CATALOG,
-  type ClassCategory,
-  type MarkerInterpretation,
-} from "@gymflow/shared";
+import type { ClassCategory, MarkerInterpretation } from "@gymflow/shared";
 import { api, ApiError } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import { useToast } from "@/components/toast";
@@ -51,16 +47,16 @@ interface Recommendation {
 }
 
 /**
- * Given the category of a class and which tone (good/avoid), find up to
- * two perMarker explanations that justify the tag. Priority: out-of-range
- * markers first, then borderline, then the highest-impact one.
+ * Pick the single most relevant perMarker explanation for a category tag.
+ * Out-of-range first, then borderline, then highest-impact. The card shows
+ * only this one sentence — the full per-marker breakdown lives in /health.
  */
-function reasonsForCategory(
+function topReasonForCategory(
   rec: Recommendation | null,
   category: ClassCategory,
   tone: "good" | "avoid",
-): PerMarkerGuidance[] {
-  if (!rec) return [];
+): PerMarkerGuidance | null {
+  if (!rec) return null;
   const list = rec.perMarker.filter((m) => {
     const cats = tone === "good" ? m.suggestedCategories : m.avoidCategories;
     return cats.includes(category);
@@ -74,19 +70,12 @@ function reasonsForCategory(
     NORMAL: 2,
     UNKNOWN: 3,
   };
-  return [...list]
-    .sort(
+  return (
+    [...list].sort(
       (a, b) =>
         interpRank[a.interpretation] - interpRank[b.interpretation] ||
         impactRank[a.impact] - impactRank[b.impact],
-    )
-    .slice(0, 2);
-}
-
-function markerLabel(canonicalName: string): string {
-  return (
-    MARKER_CATALOG.find((m) => m.canonicalName === canonicalName)?.label ??
-    canonicalName
+    )[0] ?? null
   );
 }
 
@@ -233,13 +222,13 @@ function ClassCard({
   const full = klass._count.bookings >= klass.capacity;
   const isGood = Boolean(rec?.recommendedCategories.includes(klass.category));
   const isAvoid = Boolean(rec?.avoidCategories.includes(klass.category));
-  const reasons = useMemo(
+  const reason = useMemo(
     () =>
       isGood
-        ? reasonsForCategory(rec, klass.category, "good")
+        ? topReasonForCategory(rec, klass.category, "good")
         : isAvoid
-          ? reasonsForCategory(rec, klass.category, "avoid")
-          : [],
+          ? topReasonForCategory(rec, klass.category, "avoid")
+          : null,
     [rec, klass.category, isGood, isAvoid],
   );
 
@@ -301,7 +290,7 @@ function ClassCard({
         </div>
       </div>
 
-      {reasons.length > 0 && (
+      {reason && (
         <div
           className={`mt-3 rounded-md px-3 py-2 text-xs ${
             isGood
@@ -310,17 +299,7 @@ function ClassCard({
           }`}
         >
           <div className="flex flex-wrap items-start justify-between gap-2">
-            <div className="space-y-1.5">
-              {reasons.map((r) => (
-                <div key={r.canonicalName} className="flex gap-2">
-                  <span className="font-semibold whitespace-nowrap">
-                    {markerLabel(r.canonicalName)} ·{" "}
-                    {formatBand(r.interpretation)}:
-                  </span>
-                  <span className="text-ink-700">{r.explanation}</span>
-                </div>
-              ))}
-            </div>
+            <p className="leading-relaxed">{reason.explanation}</p>
             <Link
               href="/health"
               className={`inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-md border bg-white px-2 py-1 text-[10px] font-medium transition ${
@@ -336,21 +315,4 @@ function ClassCard({
       )}
     </article>
   );
-}
-
-function formatBand(i: MarkerInterpretation): string {
-  switch (i) {
-    case "LOW":
-      return "low";
-    case "HIGH":
-      return "high";
-    case "BORDERLINE_LOW":
-      return "near the lower edge";
-    case "BORDERLINE_HIGH":
-      return "near the upper edge";
-    case "NORMAL":
-      return "normal";
-    default:
-      return "unclassified";
-  }
 }

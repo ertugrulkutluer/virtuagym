@@ -1,8 +1,10 @@
 import { z } from "zod";
+import { ClassCategory } from "../constants/class-category";
 
 export const CreateClassSchema = z.object({
   title: z.string().min(1).max(120),
   description: z.string().max(2000).optional(),
+  category: z.nativeEnum(ClassCategory).optional(),
   startsAt: z.string().datetime(),
   durationMinutes: z.number().int().min(5).max(12 * 60),
   capacity: z.number().int().min(1).max(500),

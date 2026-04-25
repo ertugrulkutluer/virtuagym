@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Inter, Fraunces } from "next/font/google";
 import { Nav } from "@/components/nav";
+import { SiteShell } from "@/components/site-shell";
 import { ToastProvider } from "@/components/toast";
 import "./globals.css";
 
@@ -32,7 +33,7 @@ export default function RootLayout({
       <body className="min-h-screen antialiased bg-ink-50 text-ink-900 font-sans">
         <ToastProvider>
           <Nav />
-          {children}
+          <SiteShell>{children}</SiteShell>
         </ToastProvider>
       </body>
     </html>

@@ -16,6 +16,7 @@ export class ClassesRepository {
       data: {
         title: input.title,
         description: input.description,
+        category: input.category,
         startsAt: new Date(input.startsAt),
         durationMinutes: input.durationMinutes,
         capacity: input.capacity,
@@ -32,7 +33,13 @@ export class ClassesRepository {
       where: { id },
       include: {
         trainer: { select: { id: true, name: true } },
-        _count: { select: { bookings: { where: { status: "ACTIVE" } } } },
+        _count: {
+          select: {
+            bookings: {
+              where: { status: { in: ["ACTIVE", "PROMOTED", "CHECKED_IN"] } },
+            },
+          },
+        },
       },
     });
   }
@@ -56,7 +63,13 @@ export class ClassesRepository {
         skip,
         include: {
           trainer: { select: { id: true, name: true } },
-          _count: { select: { bookings: { where: { status: "ACTIVE" } } } },
+          _count: {
+          select: {
+            bookings: {
+              where: { status: { in: ["ACTIVE", "PROMOTED", "CHECKED_IN"] } },
+            },
+          },
+        },
         },
       }),
       this.prisma.class.count({ where }),
