@@ -251,9 +251,11 @@ export default function HealthPage() {
             Your weekly program, tuned to your blood panel.
           </h1>
           <p className="mt-2 max-w-2xl text-sm text-ink-500">
-            Upload a lab PDF or enter values manually. Rules classify each
-            marker deterministically; Grok writes the week&apos;s training
-            plan from the bands, not the raw numbers.
+            {UPLOAD_ENABLED
+              ? "Upload a lab PDF or enter values manually."
+              : "Enter your blood marker values manually."}{" "}
+            Rules classify each marker deterministically; Grok writes the
+            week&apos;s training plan from the bands, not the raw numbers.
           </p>
         </div>
       </header>
@@ -492,6 +494,9 @@ function PendingBanner({ pending }: { pending: PendingAnalysis }) {
 
 // ── Upload + manual entry ───────────────────────────────────────────
 
+const UPLOAD_ENABLED =
+  process.env.NEXT_PUBLIC_UPLOAD_ENABLED !== "false";
+
 function UploadSection({
   token,
   onPending,
@@ -499,7 +504,9 @@ function UploadSection({
   token: string | null;
   onPending: (reportId: string, markers: number) => void;
 }) {
-  const [mode, setMode] = useState<"pdf" | "manual">("pdf");
+  const [mode, setMode] = useState<"pdf" | "manual">(
+    UPLOAD_ENABLED ? "pdf" : "manual",
+  );
   return (
     <section className="mt-8 rounded-2xl border border-ink-200 bg-white p-6 shadow-soft sm:p-8">
       <div className="flex flex-wrap items-center justify-between gap-4">
@@ -508,21 +515,25 @@ function UploadSection({
             New report
           </div>
           <h2 className="mt-1 font-display text-lg font-semibold tracking-tight">
-            Upload a lab PDF or enter values
+            {UPLOAD_ENABLED
+              ? "Upload a lab PDF or enter values"
+              : "Enter values manually"}
           </h2>
         </div>
-        <div className="inline-flex rounded-lg border border-ink-200 bg-ink-50 p-1 text-xs">
-          <Tab active={mode === "pdf"} onClick={() => setMode("pdf")}>
-            PDF upload
-          </Tab>
-          <Tab active={mode === "manual"} onClick={() => setMode("manual")}>
-            Manual
-          </Tab>
-        </div>
+        {UPLOAD_ENABLED && (
+          <div className="inline-flex rounded-lg border border-ink-200 bg-ink-50 p-1 text-xs">
+            <Tab active={mode === "pdf"} onClick={() => setMode("pdf")}>
+              PDF upload
+            </Tab>
+            <Tab active={mode === "manual"} onClick={() => setMode("manual")}>
+              Manual
+            </Tab>
+          </div>
+        )}
       </div>
 
       <div className="mt-6">
-        {mode === "pdf" ? (
+        {UPLOAD_ENABLED && mode === "pdf" ? (
           <PdfFlow token={token} onPending={onPending} />
         ) : (
           <ManualFlow token={token} onPending={onPending} />

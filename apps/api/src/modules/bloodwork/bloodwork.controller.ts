@@ -5,6 +5,7 @@ import {
   Param,
   ParseFilePipeBuilder,
   Post,
+  ServiceUnavailableException,
   UploadedFile,
   UseInterceptors,
 } from "@nestjs/common";
@@ -19,6 +20,7 @@ import {
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
 import { Idempotent } from "../../common/decorators/idempotent.decorator";
 import { ZodBody } from "../../common/decorators/zod-body.decorator";
+import { EnvService } from "../../config/env.service";
 import { MembersService } from "../members/members.service";
 import { BloodworkService } from "./bloodwork.service";
 
@@ -31,6 +33,7 @@ export class BloodworkController {
   constructor(
     private readonly bloodwork: BloodworkService,
     private readonly members: MembersService,
+    private readonly env: EnvService,
   ) {}
 
   @Throttle({ ai: { limit: 10, ttl: 60_000 } })
@@ -46,6 +49,9 @@ export class BloodworkController {
     )
     file: Express.Multer.File,
   ) {
+    if (!this.env.get("UPLOAD_ENABLED")) {
+      throw new ServiceUnavailableException("PDF upload is disabled");
+    }
     if (!file?.buffer) {
       throw new BadRequestException("file missing");
     }

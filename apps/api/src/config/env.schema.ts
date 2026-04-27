@@ -22,6 +22,8 @@ export const EnvSchema = z.object({
 
   AI_ENABLED_DEFAULT: z.coerce.boolean().default(true),
   AI_OVERBOOK_FACTOR: z.coerce.number().min(0.5).max(1.2).default(0.9),
+
+  UPLOAD_ENABLED: z.coerce.boolean().default(true),
 });
 
 export type Env = z.infer<typeof EnvSchema>;
