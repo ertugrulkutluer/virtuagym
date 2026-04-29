@@ -1,0 +1,133 @@
+import {
+  ALL_CLASS_CATEGORIES,
+  getMarkerDef,
+  type ProgramRecommendationResponse,
+} from "@gymflow/shared";
+import { createHash } from "node:crypto";
+import type { ClassifiedMarker, StratifiedMarkers } from "./classifier.service";
+
+export interface AnalysisInput {
+  stratified: StratifiedMarkers;
+  previousSummary?: {
+    outOfRange: Array<{ canonicalName: string; interpretation: string }>;
+    readinessScore: number | null;
+    createdAt: string;
+  } | null;
+}
+
+export function hashAnalyzerInput(system: string, user: string): string {
+  return createHash("sha256")
+    .update(system)
+    .update("\n\n")
+    .update(user)
+    .digest("hex");
+}
+
+export function buildAnalyzerSystemPrompt(): string {
+  return [
+    "You are a fitness programming assistant that reads already-classified blood-test markers and proposes a one-week gym plan.",
+    "IMPORTANT: The rule layer has already bucketed each marker into LOW / BORDERLINE_LOW / NORMAL / BORDERLINE_HIGH / HIGH / UNKNOWN. DO NOT re-interpret numeric values yourself — trust the interpretation band.",
+    "Return STRICT JSON matching this TypeScript type:",
+    "{",
+    "  readinessScore: number,                  // 0-100; 100 = fully ready for intense training",
+    "  recommendedCategories: ClassCategory[],  // picks for this week",
+    "  avoidCategories: ClassCategory[],        // categories to skip this week",
+    "  perMarker: {",
+    "    canonicalName: string,",
+    "    interpretation: MarkerInterpretation,  // echo the input band",
+    "    explanation: string,                   // ONE short sentence, plain everyday language, member-facing",
+    "    impact: 'NONE'|'LOW'|'MEDIUM'|'HIGH',",
+    "    suggestedCategories: ClassCategory[],",
+    "    avoidCategories: ClassCategory[]",
+    "  }[],",
+    "  weeklyPlan: string,                      // short paragraph prescribing the week (days + intensity)",
+    "  warnings: string[],                      // short, actionable cautions",
+    "  summary: string                          // 2-3 sentence member-facing motivational summary",
+    "}",
+    `ClassCategory ∈ { ${ALL_CLASS_CATEGORIES.join(", ")} }`,
+    "MarkerInterpretation ∈ { LOW, BORDERLINE_LOW, NORMAL, BORDERLINE_HIGH, HIGH, UNKNOWN }",
+    "Rules:",
+    "- Never include numbers from the marker values in your prose; use qualitative language ('low', 'at the upper edge', 'normal').",
+    "- perMarker.explanation must be ONE short sentence in plain, everyday language a gym member with no medical background would understand. Speak to the member directly ('you', 'your week') in a calm, encouraging tone. Do NOT use medical jargon (e.g. avoid 'anaerobic capacity', 'oxygen delivery', 'cortisol', 'hemoglobin', 'thyroid', 'inflammation marker'). Do NOT start with 'Because your ...' or 'Your <marker> is ...'. Do NOT name the marker — focus on what the member should DO this week and why it will feel better.",
+    "- perMarker entries must echo the interpretation from the input. If input says BORDERLINE_LOW, you must say BORDERLINE_LOW.",
+    "- readinessScore should drop more for OUT-OF-RANGE markers than for BORDERLINE ones; UNKNOWN markers do not reduce the score.",
+    "- Be conservative with HIIT when iron panel or hemoglobin is low; favour RECOVERY / MOBILITY / YOGA.",
+    "- For healthy inputs (all NORMAL), feel free to recommend mixed intensity.",
+    "- Output JSON only. No preamble.",
+  ].join("\n");
+}
+
+export function buildAnalyzerUserPrompt(input: AnalysisInput): string {
+  const describeMarker = (m: ClassifiedMarker) => {
+    const def = getMarkerDef(m.canonicalName);
+    const hint = def?.exerciseRelevance ? ` — ${def.exerciseRelevance}` : "";
+    return `- ${m.canonicalName} (${m.label}) [${m.category}] → ${m.interpretation}${hint}`;
+  };
+
+  const lines: string[] = [];
+  lines.push("CLASSIFIED MARKERS (interpretation bands are authoritative):");
+  lines.push("");
+  lines.push("## Out of range");
+  lines.push(
+    input.stratified.outOfRange.length
+      ? input.stratified.outOfRange.map(describeMarker).join("\n")
+      : "(none)",
+  );
+  lines.push("");
+  lines.push("## Borderline");
+  lines.push(
+    input.stratified.borderline.length
+      ? input.stratified.borderline.map(describeMarker).join("\n")
+      : "(none)",
+  );
+  lines.push("");
+  lines.push("## Normal");
+  lines.push(
+    input.stratified.normal.length
+      ? input.stratified.normal.map(describeMarker).join("\n")
+      : "(none)",
+  );
+  if (input.stratified.unknown.length) {
+    lines.push("");
+    lines.push("## Unknown / unrecognised");
+    lines.push(input.stratified.unknown.map(describeMarker).join("\n"));
+  }
+
+  if (input.previousSummary) {
+    lines.push("");
+    lines.push("## Previous report (for trend context only — do not quote numbers)");
+    lines.push(
+      `readinessScore: ${input.previousSummary.readinessScore ?? "n/a"}`,
+    );
+    lines.push(
+      `outOfRange: ${input.previousSummary.outOfRange
+        .map((m) => `${m.canonicalName}=${m.interpretation}`)
+        .join(", ") || "(none)"}`,
+    );
+  }
+
+  return lines.join("\n");
+}
+
+/**
+ * Defensive cleanup: keep only catalog-known canonical names in perMarker,
+ * and ensure avoid/recommended categories are in the allowed set.
+ */
+export function sanitizeRecommendation(
+  r: ProgramRecommendationResponse,
+): ProgramRecommendationResponse {
+  const allowedCategories = new Set(ALL_CLASS_CATEGORIES);
+  const cleanList = (xs: string[]) =>
+    xs.filter((c) => allowedCategories.has(c as never)) as typeof r.recommendedCategories;
+
+  return {
+    ...r,
+    recommendedCategories: cleanList(r.recommendedCategories as string[]),
+    avoidCategories: cleanList(r.avoidCategories as string[]),
+    perMarker: r.perMarker.map((m) => ({
+      ...m,
+      suggestedCategories: cleanList(m.suggestedCategories as string[]),
+      avoidCategories: cleanList(m.avoidCategories as string[]),
+    })),
+  };
+}

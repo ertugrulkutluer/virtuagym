@@ -7,11 +7,9 @@ import {
 import {
   BloodTestReport,
   ClassCategory,
-  MarkerInterpretation,
   ReportSource,
 } from "@prisma/client";
 import {
-  resolveCanonicalMarkerName,
   type CreateBloodTestReportInput,
   type ProgramRecommendationResponse,
 } from "@gymflow/shared";
@@ -23,6 +21,10 @@ import {
 } from "./bloodwork.repository";
 import { PdfExtractor, type ExtractionResult } from "./pdf-extractor.service";
 import { RealtimeGateway } from "../realtime/realtime.gateway";
+import {
+  normaliseMarkers,
+  toPrismaInterpretation,
+} from "./bloodwork.helpers";
 
 const VALID_FOR_DAYS = 7;
 
@@ -61,7 +63,7 @@ export class BloodworkService {
     memberId: string,
     input: CreateBloodTestReportInput,
   ): Promise<CreateReportPendingResponse> {
-    const normalised = this.normaliseMarkers(input.markers);
+    const normalised = normaliseMarkers(input.markers);
     if (normalised.length === 0) {
       throw new BadRequestException({
         error: "no_recognised_markers",
@@ -89,7 +91,7 @@ export class BloodworkService {
           unit: m.unit,
           refLow: m.refLow,
           refHigh: m.refHigh,
-          interpretation: this.toPrismaInterpretation(m.interpretation),
+          interpretation: toPrismaInterpretation(m.interpretation),
         })),
       }),
     );
@@ -208,40 +210,6 @@ export class BloodworkService {
 
   latestRecommendationForMember(memberId: string) {
     return this.repo.latestRecommendationForMember(memberId);
-  }
-
-  // ── helpers ─────────────────────────────────────────────────
-
-  private normaliseMarkers(inputs: CreateBloodTestReportInput["markers"]) {
-    const out: CreateBloodTestReportInput["markers"] = [];
-    const seen = new Set<string>();
-    for (const m of inputs) {
-      const canonical =
-        resolveCanonicalMarkerName(m.canonicalName) ??
-        resolveCanonicalMarkerName(m.label);
-      if (!canonical) continue;
-      if (seen.has(canonical)) continue;
-      seen.add(canonical);
-      out.push({ ...m, canonicalName: canonical });
-    }
-    return out;
-  }
-
-  private toPrismaInterpretation(i: string): MarkerInterpretation {
-    switch (i) {
-      case "LOW":
-        return MarkerInterpretation.LOW;
-      case "BORDERLINE_LOW":
-        return MarkerInterpretation.BORDERLINE_LOW;
-      case "NORMAL":
-        return MarkerInterpretation.NORMAL;
-      case "BORDERLINE_HIGH":
-        return MarkerInterpretation.BORDERLINE_HIGH;
-      case "HIGH":
-        return MarkerInterpretation.HIGH;
-      default:
-        return MarkerInterpretation.UNKNOWN;
-    }
   }
 }
 

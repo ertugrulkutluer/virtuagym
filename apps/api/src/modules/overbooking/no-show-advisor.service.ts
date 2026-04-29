@@ -3,12 +3,12 @@ import {
   NoShowAdvisorResponse,
   NoShowAdvisorResponseSchema,
 } from "@gymflow/shared";
-import { createHash } from "node:crypto";
 import { EnvService } from "../../config/env.service";
 import { PrismaService } from "../../core/prisma/prisma.service";
 import { RedisService } from "../../core/redis/redis.service";
 import { GrokClient } from "../../core/grok/grok.service";
 import { OverbookDecisionRepository } from "./overbook-decision.repository";
+import { buildAdviceCacheKey, buildAdvisorPrompt } from "./advisor.helpers";
 
 interface OverbookDecision {
   allow: boolean;
@@ -102,9 +102,10 @@ export class NoShowAdvisor {
     // Cache by the fingerprint of (live booking ids + overbook factor). If
     // any booking is added or cancelled the fingerprint changes, so the cache
     // entry naturally becomes a miss without a separate invalidation call.
-    const cacheKey = this.buildCacheKey(
+    const cacheKey = buildAdviceCacheKey(
       classId,
       context.liveBookings.map((b) => b.id),
+      this.overbookFactor,
     );
     const cached = await this.redis.getJson<NoShowAdvisorResponse>(cacheKey);
     if (cached) {
@@ -112,7 +113,7 @@ export class NoShowAdvisor {
       return cached;
     }
 
-    const prompt = this.buildPrompt(context);
+    const prompt = buildAdvisorPrompt(context);
     const completion = await this.grok.chat({
       messages: [
         {
@@ -154,14 +155,6 @@ export class NoShowAdvisor {
     });
 
     return parsed;
-  }
-
-  private buildCacheKey(classId: string, bookingIds: string[]): string {
-    const digest = createHash("sha1")
-      .update(`${bookingIds.slice().sort().join(",")}|f${this.overbookFactor}`)
-      .digest("hex")
-      .slice(0, 16);
-    return `overbook:advice:${classId}:${digest}`;
   }
 
   decisionHistory(limit = 30) {
@@ -211,63 +204,4 @@ export class NoShowAdvisor {
     };
   }
 
-  private buildPrompt(
-    ctx: Awaited<ReturnType<NoShowAdvisor["gatherContext"]>>,
-  ): string {
-    const { class: klass, liveBookings } = ctx;
-
-    const members = liveBookings.map((b) => {
-      const recent = b.member.attendance;
-      const rate =
-        recent.length === 0
-          ? null
-          : recent.filter((a) => a.showed).length / recent.length;
-      return {
-        bookingId: b.id,
-        memberId: b.member.id,
-        name: `${b.member.firstName} ${b.member.lastName}`,
-        cohort: b.member.cohort,
-        tenureDays: Math.floor(
-          (Date.now() - b.member.tenureStart.getTime()) / 86_400_000,
-        ),
-        recentAttendanceRate: rate,
-        recentSamples: recent.length,
-        leadTimeHours: Number(
-          ((klass.startsAt.getTime() - b.bookedAt.getTime()) / 3_600_000).toFixed(1),
-        ),
-      };
-    });
-
-    return JSON.stringify(
-      {
-        class: {
-          id: klass.id,
-          title: klass.title,
-          startsAt: klass.startsAt.toISOString(),
-          hourOfDayUTC: klass.startsAt.getUTCHours(),
-          dayOfWeekUTC: klass.startsAt.getUTCDay(),
-          durationMinutes: klass.durationMinutes,
-          capacity: klass.capacity,
-          trainer: klass.trainer?.name ?? null,
-        },
-        members,
-        schema: {
-          expectedAttendance: "number — sum of showProbability across members",
-          expectedNoShows: "number — members.length - expectedAttendance",
-          overbookRecommendation: "'ALLOW' or 'DENY'",
-          riskBand: "'LOW' | 'MEDIUM' | 'HIGH'",
-          rationale: "short 1–2 sentence reason",
-          perBooking: [
-            {
-              bookingId: "string",
-              showProbability: "0..1",
-              note: "optional short note",
-            },
-          ],
-        },
-      },
-      null,
-      2,
-    );
-  }
 }
